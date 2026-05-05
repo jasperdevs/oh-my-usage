@@ -1,4 +1,5 @@
 export type ProviderId = "codex" | "claude" | "opencode";
+export type UsageRange = "day" | "month" | "year" | "all";
 
 export interface TokenUsage {
   input: number;
@@ -48,13 +49,25 @@ export interface ProviderSummary {
 export interface UsageReport {
   generatedAt: string;
   sinceDays: number;
+  range: UsageRange;
+  stale?: boolean;
+  loading?: boolean;
   summaries: ProviderSummary[];
   records: UsageRecord[];
   warnings: string[];
 }
 
+export interface UsageCache {
+  version: 1;
+  generatedAt: string;
+  records: UsageRecord[];
+  auth: Record<ProviderId, ProviderAuthStatus>;
+  warnings: string[];
+}
+
 export interface OhMyUsageConfig {
   sinceDays: number;
+  defaultRange: UsageRange;
   codexRoot?: string;
   claudeRoot?: string;
   opencodeDb?: string;

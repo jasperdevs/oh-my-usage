@@ -3,8 +3,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Database } from "bun:sqlite";
-import { collectUsage } from "../src/collectors";
+import { buildUsageReport, collectUsage, rangeToSince } from "../src/collectors";
 import type { OhMyUsageConfig } from "../src/types";
+
+process.env.OH_MY_USAGE_DISABLE_CACHE_WRITE = "1";
 
 function makeRoot(): string {
   return join(tmpdir(), `oh-my-usage-${Date.now()}-${Math.random().toString(16).slice(2)}`);
@@ -13,6 +15,7 @@ function makeRoot(): string {
 function testConfig(root: string): OhMyUsageConfig {
   return {
     sinceDays: 365,
+    defaultRange: "month",
     codexRoot: join(root, "codex"),
     claudeRoot: join(root, "claude"),
     opencodeDb: join(root, "opencode", "opencode.db"),
@@ -30,6 +33,17 @@ function testConfig(root: string): OhMyUsageConfig {
 }
 
 describe("collectUsage", () => {
+  test("rangeToSince supports day month year and all", () => {
+    const now = Date.parse("2026-05-05T12:00:00.000Z");
+    const day = rangeToSince("day", now);
+    expect(day.getHours()).toBe(0);
+    expect(day.getMinutes()).toBe(0);
+    expect(day.getSeconds()).toBe(0);
+    expect(rangeToSince("month", now, 30).getTime()).toBe(now - 30 * 24 * 60 * 60 * 1000);
+    expect(rangeToSince("year", now).getTime()).toBe(now - 365 * 24 * 60 * 60 * 1000);
+    expect(rangeToSince("all", now).getTime()).toBe(0);
+  });
+
   test("parses Codex cumulative JSONL once per session", () => {
     const root = makeRoot();
     const sessionDir = join(root, "codex", "sessions", "2026", "05", "05");
@@ -108,5 +122,43 @@ describe("collectUsage", () => {
     expect(opencode?.records).toBe(1);
     expect(opencode?.tokens.total).toBe(16);
     expect(opencode?.costUsd).toBe(0.01);
+  });
+
+  test("buildUsageReport filters records by selected range", () => {
+    const root = makeRoot();
+    const config = testConfig(root);
+    const auth = {
+      codex: { provider: "codex", label: "Codex", oauth: "connected", source: "test", detail: "test" },
+      claude: { provider: "claude", label: "Claude Code", oauth: "connected", source: "test", detail: "test" },
+      opencode: { provider: "opencode", label: "opencode", oauth: "connected", source: "test", detail: "test" },
+    } as const;
+    const report = buildUsageReport(
+      [
+        {
+          provider: "codex",
+          providerLabel: "Codex",
+          model: "new",
+          sessionId: "new",
+          source: "test",
+          timestamp: new Date().toISOString(),
+          tokens: { input: 1, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 1 },
+        },
+        {
+          provider: "codex",
+          providerLabel: "Codex",
+          model: "old",
+          sessionId: "old",
+          source: "test",
+          timestamp: "2020-01-01T00:00:00.000Z",
+          tokens: { input: 10, cachedInput: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 10 },
+        },
+      ],
+      auth,
+      [],
+      config,
+      "month",
+    );
+    expect(report.records).toHaveLength(1);
+    expect(report.summaries.find((item) => item.provider === "codex")?.tokens.total).toBe(1);
   });
 });

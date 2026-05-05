@@ -5,6 +5,7 @@ import { configDir, homePath, resolveUserPath } from "./env";
 
 const DEFAULT_CONFIG: OhMyUsageConfig = {
   sinceDays: 30,
+  defaultRange: "month",
   codexRoot: "~/.codex",
   claudeRoot: "~/.claude",
   opencodeDb: "~/.local/share/opencode/opencode.db",
@@ -72,6 +73,14 @@ export function setConfigValue(config: OhMyUsageConfig, key: string, value: stri
     const days = Number(value);
     if (!Number.isFinite(days) || days < 1) throw new Error("sinceDays must be a positive number");
     next.sinceDays = Math.round(days);
+    return next;
+  }
+
+  if (key === "defaultRange") {
+    if (!["day", "month", "year", "all"].includes(value)) {
+      throw new Error("defaultRange must be day, month, year, or all");
+    }
+    next.defaultRange = value as OhMyUsageConfig["defaultRange"];
     return next;
   }
 

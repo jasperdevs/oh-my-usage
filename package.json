@@ -1,6 +1,6 @@
 {
   "name": "oh-my-usage",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A local-first OpenTUI usage dashboard for Codex, Claude Code, and opencode subscription workflows.",
   "type": "module",
   "bin": {
@@ -9,7 +9,7 @@
   },
   "files": [
     "dist",
-    "assets",
+    "assets/logo.png",
     "README.md",
     "LICENSE"
   ],

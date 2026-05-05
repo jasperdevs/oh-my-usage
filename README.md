@@ -21,9 +21,24 @@ Requires [Bun](https://bun.sh/) because the CLI is built on OpenTUI and uses Bun
 oh-my-usage             # OpenTUI dashboard
 oh-my-usage --once      # one-shot terminal summary
 oh-my-usage --json      # raw report for scripts
+oh-my-usage --day       # today
+oh-my-usage --month     # configured month window
+oh-my-usage --year      # last 365 days
+oh-my-usage --all       # all cached/scanned usage
+oh-my-usage --refresh   # force a fresh scan
 oh-my-usage auth        # subscription/OAuth status
 oh-my-usage settings    # local config
 omu --once              # short alias
+```
+
+Inside the TUI:
+
+```text
+left/right  provider tabs
+up/down     day/month/year/all-time range
+r           refresh in the background
+s           OpenTUI settings panel
+q           quit
 ```
 
 The dashboard reads local usage records that the tools already write:
@@ -42,6 +57,7 @@ Settings live at `~/.config/oh-my-usage/config.json`.
 
 ```bash
 oh-my-usage settings sinceDays 14
+oh-my-usage settings defaultRange month
 oh-my-usage settings colors.codex "#10a7ff"
 oh-my-usage settings colors.claude "#d97745"
 oh-my-usage settings colors.opencode "#f8fafc"

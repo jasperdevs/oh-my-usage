@@ -1,8 +1,11 @@
-import type { OhMyUsageConfig, ProviderAuthStatus, ProviderId, ProviderSummary, TokenUsage, UsageRecord, UsageReport } from "../types";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { OhMyUsageConfig, ProviderAuthStatus, ProviderId, ProviderSummary, TokenUsage, UsageCache, UsageRange, UsageRecord, UsageReport } from "../types";
 import { collectCodex, codexAuthStatus } from "./codex";
 import { collectClaude, claudeAuthStatus } from "./claude";
 import { collectOpenCode, opencodeAuthStatus } from "./opencode";
 import { providerColor, resolvedConfig } from "../lib/config";
+import { stateDir } from "../lib/env";
 
 function blankTokens(): TokenUsage {
   return {
@@ -30,9 +33,51 @@ const LABELS: Record<ProviderId, string> = {
   opencode: "opencode",
 };
 
-export function collectUsage(config: OhMyUsageConfig): UsageReport {
+export function cachePath(): string {
+  return join(stateDir(), "usage-cache.json");
+}
+
+export function loadUsageCache(): UsageCache | undefined {
+  try {
+    const path = cachePath();
+    if (!existsSync(path)) return undefined;
+    const cache = JSON.parse(readFileSync(path, "utf8")) as UsageCache;
+    return cache.version === 1 ? cache : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveUsageCache(cache: UsageCache): void {
+  if (process.env.OH_MY_USAGE_DISABLE_CACHE_WRITE === "1") return;
+  mkdirSync(stateDir(), { recursive: true });
+  writeFileSync(cachePath(), `${JSON.stringify(cache)}\n`);
+}
+
+export function rangeToSince(range: UsageRange, now = Date.now(), sinceDays = 30): Date {
+  if (range === "day") {
+    const date = new Date(now);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  }
+  if (range === "year") return new Date(now - 365 * 24 * 60 * 60 * 1000);
+  if (range === "all") return new Date(0);
+  return new Date(now - sinceDays * 24 * 60 * 60 * 1000);
+}
+
+export function emptyReport(config: OhMyUsageConfig, range: UsageRange): UsageReport {
   const resolved = resolvedConfig(config);
-  const since = new Date(Date.now() - resolved.sinceDays * 24 * 60 * 60 * 1000);
+  const auth: Record<ProviderId, ProviderAuthStatus> = {
+    codex: codexAuthStatus(resolved.codexRoot),
+    claude: claudeAuthStatus(resolved.claudeRoot),
+    opencode: opencodeAuthStatus(resolved.opencodeDb),
+  };
+  return buildUsageReport([], auth, [], config, range, { loading: true });
+}
+
+export function collectUsage(config: OhMyUsageConfig, range: UsageRange = config.defaultRange): UsageReport {
+  const resolved = resolvedConfig(config);
+  const since = new Date(0);
   const warnings: string[] = [];
   const auth: Record<ProviderId, ProviderAuthStatus> = {
     codex: codexAuthStatus(resolved.codexRoot),
@@ -60,6 +105,34 @@ export function collectUsage(config: OhMyUsageConfig): UsageReport {
     warnings.push(`opencode collector failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  const cache: UsageCache = {
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    records,
+    auth,
+    warnings,
+  };
+  saveUsageCache(cache);
+
+  return buildUsageReport(records, auth, warnings, resolved, range);
+}
+
+export function collectUsageFromCache(config: OhMyUsageConfig, range: UsageRange = config.defaultRange): UsageReport | undefined {
+  const cache = loadUsageCache();
+  if (!cache) return undefined;
+  return buildUsageReport(cache.records, cache.auth, cache.warnings, resolvedConfig(config), range, { stale: true });
+}
+
+export function buildUsageReport(
+  allRecords: UsageRecord[],
+  auth: Record<ProviderId, ProviderAuthStatus>,
+  warnings: string[],
+  config: OhMyUsageConfig,
+  range: UsageRange,
+  flags: Pick<UsageReport, "stale" | "loading"> = {},
+): UsageReport {
+  const since = rangeToSince(range, Date.now(), config.sinceDays);
+  const records = allRecords.filter((record) => new Date(record.timestamp) >= since);
   const summaries = (["codex", "claude", "opencode"] as ProviderId[]).map((provider): ProviderSummary => {
     const providerRecords = records.filter((record) => record.provider === provider);
     const sessions = new Set(providerRecords.map((record) => record.sessionId));
@@ -81,7 +154,7 @@ export function collectUsage(config: OhMyUsageConfig): UsageReport {
     return {
       provider,
       label: LABELS[provider],
-      color: providerColor(resolved, provider),
+      color: providerColor(config, provider),
       records: providerRecords.length,
       sessions: sessions.size,
       models: models.size,
@@ -96,7 +169,9 @@ export function collectUsage(config: OhMyUsageConfig): UsageReport {
 
   return {
     generatedAt: new Date().toISOString(),
-    sinceDays: resolved.sinceDays,
+    sinceDays: config.sinceDays,
+    range,
+    ...flags,
     summaries,
     records,
     warnings,

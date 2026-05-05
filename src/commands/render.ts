@@ -30,7 +30,7 @@ export function renderSummary(report: UsageReport): string {
 
   const lines = [
     "oh-my-usage",
-    `Last ${report.sinceDays} days · ${compactNumber(totals.tokens)} tokens · ${money(totals.cost)} tracked cost · ${credits(totals.credits)} Codex equivalent`,
+    `${rangeLabel(report)} · ${compactNumber(totals.tokens)} tokens · ${money(totals.cost)} tracked cost · ${credits(totals.credits)} Codex equivalent`,
     "",
     "Provider      Usage                     Tokens     Sessions    Models    Estimate    Auth",
     "────────────  ────────────────────────  ───────  ───────────  ───────  ──────────  ────────",
@@ -47,9 +47,18 @@ export function renderSummary(report: UsageReport): string {
     lines.push("", "Warnings", ...report.warnings.map((warning) => `  - ${warning}`));
   }
 
+  if (report.loading) lines.push("", "Loading fresh data in the background...");
+  if (report.stale) lines.push("", "Showing cached data. Run with --refresh or open the TUI to refresh.");
   lines.push("", "Subscription note: remaining plan quota is only shown when a provider exposes it; this tool tracks real local usage and OAuth presence without reading token values.");
 
   return `${lines.join("\n")}\n`;
+}
+
+function rangeLabel(report: UsageReport): string {
+  if (report.range === "day") return "Today";
+  if (report.range === "month") return `Last ${report.sinceDays} days`;
+  if (report.range === "year") return "Last 365 days";
+  return "All time";
 }
 
 function topModels(report: UsageReport): string[] {

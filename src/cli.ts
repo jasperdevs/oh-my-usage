@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
-import { collectUsage } from "./collectors";
+import { collectUsage, collectUsageFromCache } from "./collectors";
 import { configPath, ensureConfig, loadConfig, saveConfig, setConfigValue } from "./lib/config";
 import { syncModelsDevCache } from "./lib/pricing";
 import { renderAuth, renderSettings, renderSummary } from "./commands/render";
 import { runDashboard } from "./tui/dashboard";
-import type { UsageReport } from "./types";
+import type { UsageRange } from "./types";
 
 interface CliOptions {
   command: string;
   json: boolean;
   once: boolean;
-  demo: boolean;
+  refresh: boolean;
+  range?: UsageRange;
   since?: number;
   key?: string;
   value?: string;
@@ -21,7 +22,7 @@ function parseArgs(argv: string[]): CliOptions {
     command: "dashboard",
     json: false,
     once: false,
-    demo: false,
+    refresh: false,
   };
 
   const args = [...argv];
@@ -33,14 +34,25 @@ function parseArgs(argv: string[]): CliOptions {
     const arg = args[i];
     if (arg === "--json") options.json = true;
     else if (arg === "--once" || arg === "--summary") options.once = true;
-    else if (arg === "--demo") options.demo = true;
+    else if (arg === "--demo") options.refresh = true;
+    else if (arg === "--refresh") options.refresh = true;
     else if (arg === "--since") options.since = Number(args[++i]);
+    else if (arg === "--range") options.range = parseRange(args[++i]);
+    else if (arg === "--day") options.range = "day";
+    else if (arg === "--month") options.range = "month";
+    else if (arg === "--year") options.range = "year";
+    else if (arg === "--all" || arg === "--all-time") options.range = "all";
     else if (arg === "--help" || arg === "-h") options.command = "help";
     else if (options.command === "settings" && !options.key) options.key = arg;
     else if (options.command === "settings" && !options.value) options.value = arg;
   }
 
   return options;
+}
+
+function parseRange(value: string | undefined): UsageRange {
+  if (value === "day" || value === "month" || value === "year" || value === "all") return value;
+  throw new Error("--range must be day, month, year, or all");
 }
 
 function help(): string {
@@ -50,6 +62,11 @@ Usage:
   oh-my-usage                 open the OpenTUI dashboard
   oh-my-usage --once          print a one-shot summary
   oh-my-usage --json          print the raw report as JSON
+  oh-my-usage --day           show today
+  oh-my-usage --month         show the configured month window
+  oh-my-usage --year          show the last 365 days
+  oh-my-usage --all           show all cached/scanned usage
+  oh-my-usage --refresh       force a fresh scan instead of cached data
   oh-my-usage auth            show OAuth/subscription auth status
   oh-my-usage settings        show local settings
   oh-my-usage settings <key> <value>
@@ -63,6 +80,7 @@ Settings keys:
   colors.codex
   colors.claude
   colors.opencode
+  defaultRange
 `;
 }
 
@@ -74,52 +92,11 @@ function writeOut(text: string): void {
   }
 }
 
-function demoReport(): UsageReport {
-  const now = new Date().toISOString();
-  return {
-    generatedAt: now,
-    sinceDays: 30,
-    warnings: [],
-    records: [
-      {
-        provider: "codex",
-        providerLabel: "Codex",
-        model: "gpt-5.3-codex",
-        sessionId: "demo-codex",
-        source: "demo",
-        timestamp: now,
-        tokens: { input: 120000, cachedInput: 900000, cacheWrite: 0, output: 23000, reasoning: 14000, total: 1057000 },
-        creditEquivalent: 17.24,
-      },
-      {
-        provider: "claude",
-        providerLabel: "Claude Code",
-        model: "claude-opus-4-7",
-        sessionId: "demo-claude",
-        source: "demo",
-        timestamp: now,
-        tokens: { input: 80000, cachedInput: 500000, cacheWrite: 200000, output: 12000, reasoning: 0, total: 792000 },
-        costUsd: 2.85,
-      },
-      {
-        provider: "opencode",
-        providerLabel: "opencode Go",
-        model: "kimi-k2.6",
-        sessionId: "demo-opencode",
-        source: "demo",
-        timestamp: now,
-        tokens: { input: 60000, cachedInput: 1000000, cacheWrite: 0, output: 11000, reasoning: 30000, total: 1101000 },
-        costUsd: 0.08,
-      },
-    ],
-    summaries: [],
-  };
-}
-
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const config = ensureConfig();
   if (options.since) config.sinceDays = options.since;
+  const range = options.range || config.defaultRange;
 
   if (options.command === "help") {
     writeOut(help());
@@ -143,7 +120,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  const report = options.demo ? collectUsage(config) : collectUsage(config);
+  if (!options.once && !options.json && options.command === "dashboard" && process.stdout.isTTY) {
+    await runDashboard({
+      config,
+      initialReport: collectUsageFromCache(config, range),
+      initialRange: range,
+      loadFresh: (nextRange) => collectUsage(config, nextRange),
+    });
+    return;
+  }
+
+  const report = options.refresh ? collectUsage(config, range) : collectUsageFromCache(config, range) || collectUsage(config, range);
 
   if (options.command === "auth") {
     writeOut(renderAuth(report));
@@ -159,8 +146,6 @@ async function main(): Promise<void> {
     writeOut(renderSummary(report));
     return;
   }
-
-  await runDashboard(report);
 }
 
 main().catch((error) => {
