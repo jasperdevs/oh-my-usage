@@ -4,8 +4,8 @@
   "description": "A local-first OpenTUI usage dashboard for Codex, Claude Code, and opencode subscription workflows.",
   "type": "module",
   "bin": {
-    "oh-my-usage": "./dist/cli.js",
-    "omu": "./dist/cli.js"
+    "oh-my-usage": "dist/cli.js",
+    "omu": "dist/cli.js"
   },
   "files": [
     "dist",
